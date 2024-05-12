@@ -1,0 +1,9 @@
+# Goal
+float32 range # 移動距離
+int32 direction # 方向 0上1右2下3左
+---
+# Result
+bool result
+---
+# Feedback
+float32 progress

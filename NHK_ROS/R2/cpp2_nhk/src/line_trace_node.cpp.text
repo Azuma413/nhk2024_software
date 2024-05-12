@@ -1,0 +1,617 @@
+// ライブラリのインクルードなど
+// ********************************************************************************************************************
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <string>
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+#include "geometry_msgs/msg/point.hpp"
+#include "geometry_msgs/msg/quaternion.hpp"
+#include "actuator_custom_msgs/action/call_line_trace.hpp"
+#include "std_msgs/msg/float32.hpp"
+#include "std_srvs/srv/set_bool.hpp"
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+
+using namespace std::chrono_literals;
+using Point = geometry_msgs::msg::Point;
+using Quaternion = geometry_msgs::msg::Quaternion;
+using CallLineTrace = actuator_custom_msgs::action::CallLineTrace;
+using GoalHandleCLT = rclcpp_action::ServerGoalHandle<CallLineTrace>;
+using SetBool = std_srvs::srv::SetBool;
+
+struct Point2D{ // 座標を表す構造体
+    double x;
+    double y;
+};
+
+struct TraceCommand{ // ライントレースのコマンドを表す構造体
+    int direction; // 0: 直進，1: 右，2: 後退，3: 左
+    double distance; // 移動距離 m
+    double speed = 2.0; // 最大速度 m/s
+    bool unuse_line_sensor = false; // ラインセンサーを使うかどうか(未実装)
+    bool use_imu_for_slope =false;
+};
+// ********************************************************************************************************************
+// 定数の定義
+// ********************************************************************************************************************
+const std::vector<TraceCommand> start_command = { // スタートからエリア３までのライントレースのコマンド
+    
+    // {0, 1.5, 1.0,true,false},
+    // {3, 0.5, 1.0,true,false},
+    // {0, 0.5, 1.0,true,false},
+    // {3, 2, 2.0,true,false},
+    {0, 0.335 + 2.305 + 1 +1.15 +0.89, 2.0, true,false},
+    // {0, 0.335+2.305, 2.0,true,false},
+    // {0, 1.0, 2.0,true,true},
+    // {0, 1.15, 2.0,false,false}, // エリア1ではライントレースをしないのであれば修正が必要
+    // {0, 0.89, 2.0,false,false}, // ここからリトライゾーン
+    // {3, 3.8, 2.0,false,false},
+    // {0, 0.58, 2.0,false,false},
+    // {0, 1.0, 2.0,false,true}, // ここで坂を登りエリア３に入る
+    // {0, 0.485, 2.0,true,false},
+    // {0, 0.75, 2.0,true,false},
+    // {0, 0.75, 2.0,true,false} // エリア3の十字部分に到達　この部分も修正が必要
+};
+const std::vector<TraceCommand> retry_command = { // リトライエリアからエリア３までのライントレースのコマンド
+    {0, 0.905, 2.0,false,false}, // ここからリトライゾーン
+    // {3, 3.8, 2.0,false,false},
+    // {0, 0.7, 2.0,false,false},
+    // {0, 1.6, 2.0,false,true}, // ここで坂を登りエリア３に入る
+    // {0, 0.6, 2.0,true,false},
+    // {0, 0.75, 2.0,true,false},
+    // {0, 0.75, 2.0,true,false} // エリア3の十字部分に到達　この部分も修正が必要
+};
+const float DETECT_VEL = 0.4; // ライン検出モードの時の速度[m/s]
+const float DETECT_RANGE = 0.4; // ライン検出モードの時にどれだけ探すか[m]。左右or前後にDETECT_RANGE[m]探す
+const float TERMINAL_RANGE = 0.2; // ライントレース中，目標距離の何メートル手前で動作を変更するか。[m]
+const float TUNE_VEL = 0.4; // ライントレース中に進行方向に対して垂直方向に動いてラインを探す時の速度[m/s]
+const double MINIMUM_VEL = 0.1; // 最低速度[m/s]
+const float SLOPE_THRESHOLD = 0.2; // 傾斜を検出するための閾値
+
+const double MAX_VEL = 2.0; // 最大速度[m/s]
+const float P_VALUE = 1.0;//0.001; // P制御の係数
+const float D_VALUE = 0.005; // D制御の係数
+//const float EPSILON = 30.0; // 許容誤差[mm]
+const float EPSILON = 0.03;
+// ********************************************************************************************************************
+// クラスの定義 
+// ********************************************************************************************************************
+class LineTraceNode : public rclcpp::Node{
+    private:
+    // メンバ変数の宣言
+    // ROS用
+    rclcpp::TimerBase::SharedPtr timer;
+    rclcpp::Publisher<Point>::SharedPtr robot_vel_pub;
+    rclcpp::Subscription<Quaternion>::SharedPtr mros_output_line_sub;
+    rclcpp::Subscription<Quaternion>::SharedPtr mros_output_imu_sub;
+    rclcpp::Subscription<Point>::SharedPtr distance_sub;
+    rclcpp::Client<SetBool>::SharedPtr robot_vel_on_cli;
+    rclcpp_action::Server<CallLineTrace>::SharedPtr call_line_trace_asrv;
+    // パラメータから受け取ったフィールド情報を格納する変数
+    std::string color = "";
+    // その他の変数
+    Quaternion line_sensor_data; // サブスクライブしたそのままの値
+    bool flag = true; // サービスが利用可能かどうかのフラグ(使いまわし)
+    bool common_result; // サービスの結果を格納する変数(使いまわし)
+    bool is_slope; // 傾斜を検出したかどうかのフラグ
+    Point robot_vel_msg; // ロボットの速度を格納するメッセージ。値を入れるとtimer_callback内でpublishされる
+    // 転がしエンコーダ用関数に必要な変数
+    Point2D distance_data = {0.0, 0.0}; // サブスクライブしたそのままの値
+    Point2D old_distance = {0.0, 0.0}; // ある時点の移動距離
+    Point2D prior_error = {0.0, 0.0}; // 前回の誤差
+    // 転がしエンコーダの計測を開始する関数
+    void set_distance(void){
+        old_distance = distance_data;
+    }
+    // 転がしエンコーダの計測結果を取得する関数
+    Point2D get_distance(void){
+        Point2D distance;
+        distance.x = distance_data.x - old_distance.x;
+        distance.y = distance_data.y - old_distance.y;
+        return distance;
+    }
+
+    public:
+    LineTraceNode() : Node("line_trace_node"){
+        RCLCPP_INFO(this->get_logger(), "line_trace_node is activated");
+        // パラメータの宣言と取得
+        auto parameter = this->declare_parameter<std::string>("color", "blue");
+        if(!this->get_parameter("color", color)){
+            std::cout << "color パラメータの取得に失敗" << std::endl;
+        }else{
+            std::cout << "color: " << color << std::endl;
+        }
+
+        // n[ms]ごとに呼び出されるコールバック関数
+        auto timer_callback = [this]() -> void{
+            robot_vel_pub->publish(robot_vel_msg);
+        };
+
+        // ラインセンサの値を取得するコールバック関数
+        auto mros_output_line_callback = [this](const Quaternion& msg) -> void{
+            line_sensor_data = msg;
+        };
+
+        // IMUの値を取得して傾斜を検出するコールバック関数
+        auto mros_output_imu_callback = [this](const Quaternion& msg) -> void{
+            // imu_dataを更新
+            // std::cout << "callback" << msg->x << " " << msg->y << " " << msg->z << " " << msg->w << std::endl;
+            float roll = asin(2.0 * (msg.x * msg.z - msg.y * msg.w));
+            float pitch = asin(2.0 * (msg.x * msg.w + msg.y * msg.z));
+            if(abs(pitch) + abs(roll) > SLOPE_THRESHOLD){
+                is_slope = true;
+            }else{
+                is_slope = false;
+            }
+        };
+
+        // 転がしエンコーダの値を取得するコールバック関数
+        auto distance_callback = [this](const Point& msg) -> void{
+            distance_data.x = msg.x;
+            distance_data.y = msg.y;
+        };
+
+        // アクションサーバのコールバック関数1：クライアントから目標値を受け取ったタイミングで実行される
+        auto call_line_trace_goal = [this](const rclcpp_action::GoalUUID& uuid, std::shared_ptr<const CallLineTrace::Goal> goal) -> rclcpp_action::GoalResponse{
+            // 目標値を受け取った時の処理
+            std::cout << "目標値を受け取りました" << std::endl;
+            async_robot_vel3_on(true, common_result);
+            return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE; // ACCEPT_AND_DEFER
+        };
+
+        // アクションサーバのコールバック関数2：クライアントからキャンセルを受け取ったタイミングで実行される
+        auto call_line_trace_cancel = [this](const std::shared_ptr<GoalHandleCLT> goal_handle) -> rclcpp_action::CancelResponse{
+            // キャンセルを受け取ったときの処理
+            std::cout << "キャンセルを受け取りました" << std::endl;
+            return rclcpp_action::CancelResponse::ACCEPT;
+        };
+
+        // アクションサーバのコールバック関数3：アクションを開始するタイミングで実行される
+        auto call_line_trace_accepted = [this](const std::shared_ptr<GoalHandleCLT> goal_handle) -> void{
+            // 目標値に基づいてアクションを開始する（別のスレッドでcall_line_trace_execute関数を実行）
+            using namespace std::placeholders;
+            std::cout << "アクションを開始します" << std::endl;
+            std::thread{std::bind(&LineTraceNode::call_line_trace_execute, this, _1), goal_handle}.detach(); // メンバ関数をbindする際には，関数名の前にクラス名を明示的に指定する
+        };
+
+        // ノードの初期化 ノード同士の接続についてはメインのReadMeを参照
+        rclcpp::QoS qos(rclcpp::KeepLast(10)); // QOSの設定
+        robot_vel_pub = this->create_publisher<Point>("robot_vel3", qos);
+        mros_output_line_sub = this->create_subscription<Quaternion>("mros_output_line", qos, mros_output_line_callback);
+        distance_sub = this->create_subscription<Point>("distance", qos, distance_callback);
+        call_line_trace_asrv = rclcpp_action::create_server<CallLineTrace>(
+            this->get_node_base_interface(),
+            this->get_node_clock_interface(),
+            this->get_node_logging_interface(),
+            this->get_node_waitables_interface(),
+            "call_line_trace",
+            call_line_trace_goal,
+            call_line_trace_cancel,
+            call_line_trace_accepted
+        );
+        robot_vel_on_cli = this->create_client<SetBool>("robot_vel3_on");
+        while(!robot_vel_on_cli->wait_for_service(1s) && rclcpp::ok()){ // サービスが利用可能になるまで待機
+            if(flag){
+                std::cout << "robot_vel3_on service is not available" << std::endl;
+                flag = false;
+            }
+        }
+        std::cout << "robot_vel3_on service is available" << std::endl;
+        timer = this->create_wall_timer(10ms, timer_callback);
+    } // コンストラクタここまで
+
+    // CallLineTraceアクションサーバの実行関数。ここに機能を実装している
+    void call_line_trace_execute(const std::shared_ptr<GoalHandleCLT>& goal_handle){
+        // thread内で実行される実際の処理部分
+        rclcpp::Rate loop_rate(100); // ループの周期を設定(100Hz)
+        auto feedback = std::make_shared<CallLineTrace::Feedback>(); // アクションの進捗を格納する変数
+        auto result = std::make_shared<CallLineTrace::Result>(); // アクションの結果を格納する変数
+        Point2D distance; // 移動距離を格納する変数////
+
+        std::vector<TraceCommand> commands = get_commands(goal_handle->get_goal()->mode); // ライントレースのコマンドを格納する変数
+        if(commands.size() == 0){
+            std::cout << "commandsの取得に失敗しました" << std::endl;
+            result->result = false;
+            goal_handle->abort(result);
+            return;
+        }
+
+        // ライントレースのコマンドを1つずつ処理
+        for(int i = 0; i < commands.size(); i++){
+            // 次のコマンドによって終端の処理が変わるので，modeを設定しておく
+            int mode; // 0: 同じ方向が連続，1: 次曲がる，2: 次止まる
+            int slope_judge; //0: 平地が連続, 1: 平地ー＞斜面 2: 斜面ー＞平地 (3:斜面が連続)
+            TraceCommand command = commands[i];
+            if (i == commands.size()-1){
+                mode = 2; // 最後のコマンドの場合は終端で停止する
+                slope_judge = 0;
+            }else{
+                if(command.direction == commands[i+1].direction){ // ここでは反対の方向へ進むことは考慮していない
+                    mode = 0; // 同じ方向が連続
+                }else{
+                    mode = 1; // 次曲がる
+                }
+                if(commands[i+1].use_imu_for_slope){
+                    if(command.use_imu_for_slope) slope_judge = 3;
+                    else slope_judge = 1;
+                }else{
+                    if(command.use_imu_for_slope) slope_judge = 2;
+                    else slope_judge = 0;
+                }
+            }
+
+            // lineを探す command.unuse_line_sensorがtrueならこの処理は必要ない
+            if(!command.unuse_line_sensor){
+                // if(!search_line(command)){
+                //     result->result = false;
+                //     goal_handle->abort(result);
+                //     return;
+                // }
+
+                set_distance(); // 移動距離の測定を開始
+                set_speed(command); // 速度を設定
+                while(rclcpp::ok()){ // 移動部分のループ処理
+                    if(goal_handle->is_canceling()){ // 途中でキャンセルされていないか確認
+                        result->result = false;
+                        goal_handle->canceled(result);
+                        return;
+                    }
+                    // command.distance[m] - TERMINAL_RANGE[m] に到達したらループを抜ける
+                    // ラインセンサーの値に応じて速度を変更
+                    tune_vel(command);
+                    if(command.direction % 2 == 0){
+                        if(clip_slope_judge((abs(get_distance().y) > command.distance - TERMINAL_RANGE),slope_judge)){
+                            robot_vel_msg.x = 0.0;
+                            break;
+                        }
+                    }else{
+                        if(clip_slope_judge((abs(get_distance().x) > command.distance - TERMINAL_RANGE),slope_judge)){
+                            robot_vel_msg.y = 0.0;
+                            break;
+                        }
+                    }
+                    loop_rate.sleep();
+                }
+                // 終端処理：modeに応じて速度を変更する
+                if (mode == 0){
+                    // 減速しない，目印を検出したら次のコマンドに進む
+                    while(rclcpp::ok()){
+                        if(goal_handle->is_canceling()){ // 途中でキャンセルされていないか確認
+                            result->result = false;
+                            goal_handle->canceled(result);
+                            return;
+                        }
+                        // ラインセンサーの値に応じて速度を変更
+                        tune_vel(command);
+                        if(clip_slope_judge((detect_marker(command)),slope_judge)){
+                            break;
+                        }
+                        loop_rate.sleep();
+                    }
+                }else if (mode == 1){
+                    // 曲がる。完全に次のライン上に乗ったら次のコマンドに進む
+                    set_corner_speed(command, commands[i+1]); // 速度を設定
+                    // 0.5秒間，スリープする
+                    rclcpp::sleep_for(500ms); // 斜めに動くときにラインを検出するため
+                    while(rclcpp::ok()){
+                        if(goal_handle->is_canceling()){ // 途中でキャンセルされていないか確認
+                            result->result = false;
+                            goal_handle->canceled(result);
+                            return;
+                        }
+                        if(clip_slope_judge((detect_marker(commands[i+1])),slope_judge)){
+                            break;
+                        }
+                        loop_rate.sleep();
+                    }
+                }else if (mode == 2){
+                    // 比例制御的に減速する。目印を検出したら止まる。
+                    while(rclcpp::ok()){
+                        if(goal_handle->is_canceling()){ // 途中でキャンセルされていないか確認
+                            result->result = false;
+                            goal_handle->canceled(result);
+                            return;
+                        }
+                        tune_vel(command); // ラインセンサーの値に応じて速度を変更
+                        if(clip_slope_judge((detect_marker(command)),slope_judge)){
+                            robot_vel_msg.x = 0.0;
+                            robot_vel_msg.y = 0.0;
+                            break;
+                        }
+                        if(command.direction % 2 == 0){
+                            if(command.direction == 0){ // 直進の場合
+                                robot_vel_msg.y = std::min(MINIMUM_VEL, (command.distance - get_distance().y)/TERMINAL_RANGE*command.speed);
+                            }else{ // 後退の場合
+                                robot_vel_msg.y = std::max(-MINIMUM_VEL, (command.distance + get_distance().y)/TERMINAL_RANGE*command.speed);
+                            }
+                        }else{
+                            if(command.direction == 1){ // 右に進む場合
+                                robot_vel_msg.x = std::max(-MINIMUM_VEL, (command.distance + get_distance().x)/TERMINAL_RANGE*command.speed);
+                            }else{ // 左に進む場合
+                                robot_vel_msg.x = std::min(MINIMUM_VEL, (command.distance - get_distance().x)/TERMINAL_RANGE*command.speed);
+                            }
+                        }
+                        loop_rate.sleep();
+                    }
+                }
+                // フィードバックを送信
+                feedback->progress = (i+1)/commands.size();
+                goal_handle->publish_feedback(feedback);
+
+
+
+            }else{ 
+                switch(command.direction){
+                    case 0:
+                        distance.x = 0.0;
+                        distance.y = command.distance;
+                        break;
+                    case 1:
+                        distance.x = -command.distance;
+                        distance.y = 0.0;
+                        break;
+                    case 2:
+                        distance.x = 0.0;
+                        distance.y = -command.distance;
+                        break;
+                    case 3:
+                        distance.x = command.distance;
+                        distance.y = 0.0;
+                        break;
+                    default:break;
+                }
+                set_distance();
+                // Point2D error = {distance.x - get_distance().x, distance.y - get_distance().y};
+                Point2D error = {(distance.x - get_distance().x)/1000, (distance.y - get_distance().y)/1000};
+                // 座標は右下を原点として，左がx軸正，上がy軸正，左側のフィールドではx軸が逆になる
+
+                //std::cout << "before while" << std::endl;
+
+                while(rclcpp::ok()){
+                    if(goal_handle->is_canceling()){
+                        std::cout << "アクションがキャンセルされました" << std::endl;
+                        result->result = false;
+                        goal_handle->canceled(result);
+                        async_robot_vel3_on(false, common_result);
+                        return;
+                    }
+                    // Point2D error = {distance.x - get_distance().x, distance.y - get_distance().y};
+                    Point2D error = {distance.x - (get_distance().x)/1000, distance.y - (get_distance().y)/1000};
+
+                    //std::cout << error.x << " " << error.y << std::endl;
+
+                    if(clip_slope_judge((sqrt(error.x*error.x + error.y*error.y) < EPSILON),slope_judge)){
+                        break;
+                    }
+
+                    //std::cout << "after clip" << std::endl;
+                    // P制御によってロボットを移動させる
+                    // std::cout << "target: " << distance.x << ", " << distance.y << "\ncurrent: " << get_distance().x << ", " << get_distance().y << std::endl;
+                    std::cout << "target: " << distance.x << ", " << distance.y << "\ncurrent: " << get_distance().x/1000 << ", " << get_distance().y/1000 << std::endl;
+                    robot_vel_msg.x = std::min(error.x*P_VALUE + (prior_error.x - error.x)*D_VALUE, std::min(command.speed, MAX_VEL)); // 最大でMAX_VEL[m/s]
+                    robot_vel_msg.y = std::min(error.y*P_VALUE + (prior_error.y - error.y)*D_VALUE, std::min(command.speed, MAX_VEL)); // 最大でMAX_VEL[m/s]
+                    prior_error = error;
+                    std::this_thread::sleep_for(10ms);
+                    
+                    // std::cout << "x: " << (error.x*P_VALUE + ((command.direction%2==0 and mode==0)?0:(prior_error.x - error.x))*D_VALUE) << ", " << "y: " << (error.y*P_VALUE + (prior_error.y - error.y)*D_VALUE) << std::endl;
+                    // std::cout << "x: " << std::min(command.speed, MAX_VEL)<< ", " << "y: " << std::min(command.speed, MAX_VEL) << std::endl;
+                    // std::cout << "x: " << std::min(error.x*P_VALUE + ((command.direction%2==0 and mode==0)?0:(prior_error.x - error.x))*D_VALUE, std::min(command.speed, MAX_VEL)) << ", " << "y: " << std::min(error.y*P_VALUE + (prior_error.y - error.y)*D_VALUE, std::min(command.speed, MAX_VEL)) << std::endl;
+                    
+                    std::cout << "x: " << robot_vel_msg.x << ", " << "y: " << robot_vel_msg.y << std::endl;
+
+                }
+                prior_error = {0.0, 0.0}; // 前回の誤差                                 ]
+                // 十分にバックしたらロボットを停止
+                std::cout << "ロボットを停止します" << std::endl;
+                robot_vel_msg.x = 0;
+                robot_vel_msg.y = 0;
+                //async_robot_vel3_on(false, common_result);
+
+            }
+        } // コマンドのループここまで
+        if(rclcpp::ok()){ // アクションが成功した場合
+            result->result = true;
+            goal_handle->succeed(result);
+        }
+    }
+    // ライントレースのコマンドを取得する関数
+    std::vector<TraceCommand> get_commands(int mode){
+        if(mode == 0){
+            return start_command;
+        }else if(mode == 1){
+            return retry_command;
+        }else{
+            std::cout << "modeの値が不正です" << std::endl;
+            return {};
+        }
+    }
+    // ラインを見失っている場合，ラインを探す関数
+    bool search_line(TraceCommand command){
+        rclcpp::Rate loop_rate(100); // ループの周期を設定(100Hz)
+        Point2D distance; // 移動距離を格納する変数
+        // 進行方向のセンサーがラインを検出していない場合はロボットがずれていると判断。左右に移動してラインを探す
+        if ((command.direction == 0 and line_sensor_data.x < 0.5) or 
+            (command.direction == 1 and line_sensor_data.y < 0.5) or
+            (command.direction == 2 and line_sensor_data.z < 0.5) or
+            (command.direction == 3 and line_sensor_data.w < 0.5)){
+            set_distance(); // 移動距離の測定を開始
+            bool is_return = false;
+            if(command.direction == 0 or command.direction == 2){ // 直進または後退の場合
+                if(line_sensor_data.y > line_sensor_data.w){ // 右のセンサーの値の方が大きい場合
+                    robot_vel_msg.x = -DETECT_VEL;
+                    robot_vel_msg.y = 0.0;
+                }else{ // 左のセンサーの値の方が大きい場合
+                    robot_vel_msg.x = DETECT_VEL;
+                    robot_vel_msg.y = 0.0;
+                }
+                while(rclcpp::ok()){
+                    // 進行方向のセンサーの値が大きくなったら停止してbreak
+                    if(command.direction == 0 and line_sensor_data.x > 0.5){
+                        robot_vel_msg.x = 0.0;
+                        robot_vel_msg.y = 0.0;
+                        break;
+                    }else if(command.direction == 2 and line_sensor_data.z > 0.5){
+                        robot_vel_msg.x = 0.0;
+                        robot_vel_msg.y = 0.0;
+                        break;
+                    }
+                    distance = get_distance();
+                    if(abs(distance.x) > DETECT_RANGE*0.5 and !is_return){ // 制限距離に達したら
+                        robot_vel_msg.x = -robot_vel_msg.x; // 逆方向に移動
+                        robot_vel_msg.y = 0.0;
+                        is_return = true;
+                        set_distance(); // 移動距離の測定を開始
+                    }else if(abs(distance.x) > DETECT_RANGE and is_return){ // 制限距離に達したら
+                        robot_vel_msg.x = 0.0; // 停止
+                        robot_vel_msg.y = 0.0;
+                        // アクションを失敗させる
+                        return false;
+                    }
+                    loop_rate.sleep();
+                }
+            }else if(command.direction == 1 or command.direction == 3){ // 右または左に移動する場合
+                if(line_sensor_data.x < line_sensor_data.z){ // 後ろのセンサーの値の方が大きい場合
+                    robot_vel_msg.x = 0.0;
+                    robot_vel_msg.y = -DETECT_VEL;
+                }else{ // 前のセンサーの値の方が大きい場合
+                    robot_vel_msg.x = 0.0;
+                    robot_vel_msg.y = DETECT_VEL;
+                }
+                while(rclcpp::ok()){
+                    // 進行方向のセンサーの値が大きくなったら停止してbreak
+                    if(command.direction == 1 and line_sensor_data.y > 0.5){
+                        robot_vel_msg.x = 0.0;
+                        robot_vel_msg.y = 0.0;
+                        break;
+                    }else if(command.direction == 3 and line_sensor_data.w > 0.5){
+                        robot_vel_msg.x = 0.0;
+                        robot_vel_msg.y = 0.0;
+                        break;
+                    }
+                    distance = get_distance();
+                    if(abs(distance.y) > DETECT_RANGE*0.5 and !is_return){ // 制限距離に達したら
+                        robot_vel_msg.x = 0.0; // 逆方向に移動
+                        robot_vel_msg.y = -robot_vel_msg.y;
+                        is_return = true;
+                        set_distance(); // 移動距離の測定を開始
+                    }else if(abs(distance.y) > DETECT_RANGE and is_return){ // 制限距離に達したら
+                        robot_vel_msg.x = 0.0; // 停止
+                        robot_vel_msg.y = 0.0;
+                        // アクションを失敗させる
+                        return false;
+                    }
+                    loop_rate.sleep();
+                }
+            }
+        } // キャリブレーションここまで
+        return true;
+    }
+    // 直進時に速度を設定する関数
+    void set_speed(TraceCommand command){
+        robot_vel_msg.x = 0.0;
+        robot_vel_msg.y = 0.0;
+        if(command.direction == 0){
+            robot_vel_msg.y = command.speed;
+        }else if(command.direction == 1){
+            robot_vel_msg.x = -command.speed;
+        }else if(command.direction == 2){
+            robot_vel_msg.y = -command.speed;
+        }else if(command.direction == 3){
+            robot_vel_msg.x = command.speed;
+        }
+    }
+    // 曲がる時に速度を設定する関数
+    void set_corner_speed(TraceCommand command, TraceCommand next_command){
+        if(command.direction == 0 and next_command.direction == 1){ // 直進から右に曲がる場合
+            robot_vel_msg.x = -command.speed/1.414;
+            robot_vel_msg.y = command.speed/1.414;
+        }else if(command.direction == 0 and next_command.direction == 3){ // 直進から左に曲がる場合
+            robot_vel_msg.x = command.speed/1.414;
+            robot_vel_msg.y = command.speed/1.414;
+        }else if(command.direction == 1 and next_command.direction == 0){ // 右から直進に戻る場合
+            robot_vel_msg.x = -command.speed/1.414;
+            robot_vel_msg.y = command.speed/1.414;
+        }else if(command.direction == 1 and next_command.direction == 2){ // 右から後退する場合
+            robot_vel_msg.x = -command.speed/1.414;
+            robot_vel_msg.y = -command.speed/1.414;
+        }else if(command.direction == 3 and next_command.direction == 0){ // 左から直進に戻る場合
+            robot_vel_msg.x = command.speed/1.414;
+            robot_vel_msg.y = command.speed/1.414;
+        }else if(command.direction == 3 and next_command.direction == 2){ // 左から後退する場合
+            robot_vel_msg.x = command.speed/1.414;
+            robot_vel_msg.y = -command.speed/1.414;
+        }else if(command.direction == 2 and next_command.direction == 1){ // 後退から右に曲がる場合
+            robot_vel_msg.x = -command.speed/1.414;
+            robot_vel_msg.y = -command.speed/1.414;
+        }else if(command.direction == 2 and next_command.direction == 3){ // 後退から左に曲がる場合
+            robot_vel_msg.x = command.speed/1.414;
+            robot_vel_msg.y = -command.speed/1.414;
+        }
+    }
+    // 進行方向に対して垂直方向に動いてライン上を維持するための関数
+    void tune_vel(TraceCommand command){
+        if(command.direction%2 == 0){
+            if(line_sensor_data.y < line_sensor_data.w){
+                robot_vel_msg.x = TUNE_VEL;
+            }else{
+                robot_vel_msg.x = -TUNE_VEL;
+            }
+        }else{
+            if(line_sensor_data.x < line_sensor_data.z){
+                robot_vel_msg.y = -TUNE_VEL;
+            }else{
+                robot_vel_msg.y = TUNE_VEL;
+            }
+        }
+    }
+    // 進行方向に対して垂直に交わる目印を検出する関数
+    // 目印を検出したら進行方向に対して垂直方向の速度を0にする
+    bool detect_marker(TraceCommand command){
+        if(command.direction % 2 == 0){
+            if(line_sensor_data.y > 0.5 or line_sensor_data.w > 0.5){ // 目印を検出したら
+                robot_vel_msg.x = 0.0;
+                return true;
+            }
+        }else{
+            if(line_sensor_data.x > 0.5 or line_sensor_data.z > 0.5){ // 目印を検出したら
+                robot_vel_msg.y = 0.0;
+                return true;
+            }
+        }
+        return false;
+    }
+    bool clip_slope_judge(bool original_bool, int slope_judge_){
+        switch(slope_judge_){
+            case 1:
+                if(is_slope) return true;
+            case 2:
+                if(!is_slope) return true;
+            default : return original_bool;
+        }
+        return false;
+    }
+    // 非同期でr2_base_nodeのサービスを呼び出し，このノードからロボットの速度を制御できるようにする関数
+    // send_dataがtureなら制御できるようになる。falseなら制御できなくなる。myresultには非同期でサービスの結果が格納される
+    void async_robot_vel3_on(bool send_data, bool& myresult){
+        auto request = std::make_shared<SetBool::Request>();
+        request->data = send_data;
+        auto response_received_callback = [this, &myresult](rclcpp::Client<SetBool>::SharedFuture future) {
+            myresult = future.get()->success;
+            std::cout << "[robot_vel3_on] レスポンスを受け取りました\nresult: " << myresult << std::endl;
+        };
+        auto future_result = robot_vel_on_cli->async_send_request(request, response_received_callback);
+        std::cout << "[robot_vel3_on] リクエストを送信しました" << std::endl;
+    }
+};
+// ********************************************************************************************************************
+// メイン関数
+// ********************************************************************************************************************
+int main(int argc, char* argv[]){
+    rclcpp::init(argc,argv);
+    auto node = std::make_shared<LineTraceNode>();
+    rclcpp::spin(node);
+    rclcpp::shutdown();
+    return 0;
+}

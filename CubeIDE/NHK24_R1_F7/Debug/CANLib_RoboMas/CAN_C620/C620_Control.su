@@ -1,0 +1,4 @@
+../CANLib_RoboMas/CAN_C620/C620_Control.c:9:7:clip_f	24	static
+../CANLib_RoboMas/CAN_C620/C620_Control.c:13:6:C620_PID_Ctrl_init	16	static
+../CANLib_RoboMas/CAN_C620/C620_Control.c:18:7:C620_PID_Ctrl	32	static
+../CANLib_RoboMas/CAN_C620/C620_Control.c:25:7:C620_PID_Ctrl_AW	48	static

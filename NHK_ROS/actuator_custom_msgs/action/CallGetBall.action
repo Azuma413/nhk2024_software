@@ -1,0 +1,6 @@
+float32 x # m
+float32 y # m
+---
+bool result
+---
+float32 progress

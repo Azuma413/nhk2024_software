@@ -1,0 +1,13 @@
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:12:7:_clip_f	1
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:17:9:c620_current_f2int	1
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:22:6:C620_Ctrl_Struct_init	1
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:29:6:C620_Init	2
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:35:6:C620_SendRequest	18
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:103:6:C620_WaitForConnect	4
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:119:9:get_switch_state	2
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:127:6:c620_send_current	6
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:143:6:C620_Calibration	4
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:157:6:C620_ChangeControl	1
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:162:6:C620_SetTarget	1
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:166:6:C620_ControlEnable	1
+../CANLib_RoboMas/CAN_C620/CAN_C620.c:170:6:C620_ControlDisable	1

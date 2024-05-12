@@ -1,0 +1,9 @@
+`hsv_tst`はR1のピックアップ部分における色相検出のテストを行うためのフォルダ  
+`silo_rl_workspace`はサイロにボールを投入するシミュレーション及びカスタムgym環境が配置してあるフォルダ。  
+`yolo_finetuning`はYOLOのファインチューニングを行うためのデータセットと，テストを行うためのスクリプトが配置してあるフォルダ。  
+`3axis_sim.py`はR2の並行リンクアームの動きをシミュレーションするもの。  
+`ball_detect_test.ipynb`はopencvによるボール検出を試みたもの。  
+`detect_corner_test.ipynb`は点群データから角を検出するテスト。  
+`detect_corner_test2.ipynb`は点群データから予め決められた形状を検出するテスト。  
+`get_csv.py`はScanデータをcsvで保存するためのROSノード。  
+`particle_filter_test.py`はパーティクルフィルターによってボールを検出・追跡するテスト。  

@@ -1,0 +1,3 @@
+../Core/Src/c620_utils.c:11:6:Linearmovement	1
+../Core/Src/c620_utils.c:19:6:Rotation_POS	9
+../Core/Src/c620_utils.c:83:6:Rotation_Current	9

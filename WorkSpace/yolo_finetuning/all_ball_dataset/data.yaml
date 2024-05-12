@@ -1,0 +1,7 @@
+train: E:/SourceCode/Github/nhk2024/WorkSpace/yolo_finetuning/all_ball_dataset/train/images/
+# train: /home/kikaiken/Documents/VScode/nhk2024/WorkSpace/yolo_finetuning/all_ball_dataset/train/images/
+val: E:/SourceCode/Github/nhk2024/WorkSpace/yolo_finetuning/all_ball_dataset/valid/images/
+# val: /home/kikaiken/Documents/VScode/nhk2024/WorkSpace/yolo_finetuning/all_ball_dataset/valid/images/
+
+nc: 3
+names: ['blue', 'red', 'purple']

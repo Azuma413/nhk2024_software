@@ -1,0 +1,5 @@
+int32 id # id of silo 0~4
+---
+bool result
+---
+float32 progress

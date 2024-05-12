@@ -1,0 +1,9 @@
+../Core/Src/freertos.c:160:6:subscription_callback_air_hand	32	static
+../Core/Src/freertos.c:187:6:subscription_callback_air_shoot	32	static
+../Core/Src/freertos.c:210:6:subscription_callback_mcmd	24	static
+../Core/Src/freertos.c:229:6:subscription_callback_table	24	static
+../Core/Src/freertos.c:240:6:subscription_callback	24	static
+../Core/Src/freertos.c:279:6:MX_FREERTOS_Init	8	static
+../Core/Src/freertos.c:328:6:StartDefaultTask	584	static
+../Core/Src/freertos.c:453:6:StartLEDTask	16	static
+../Core/Src/freertos.c:466:6:C620TimerCallback	16	static

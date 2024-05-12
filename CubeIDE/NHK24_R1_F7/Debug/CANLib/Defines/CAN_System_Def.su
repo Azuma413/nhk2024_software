@@ -1,0 +1,4 @@
+../CANLib/Defines/CAN_System_Def.c:13:10:Make_CAN_ID_from_CAN_Device	32	static
+../CANLib/Defines/CAN_System_Def.c:27:10:Make_CAN_ID	24	static
+../CANLib/Defines/CAN_System_Def.c:32:12:Extract_CAN_Device	24	static
+../CANLib/Defines/CAN_System_Def.c:40:9:Extract_CAN_CMD	16	static

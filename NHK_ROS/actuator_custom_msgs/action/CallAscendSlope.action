@@ -1,0 +1,8 @@
+# Goal
+int8 direction # 方向 0上1右2下3左
+---
+# Result
+bool result
+---
+# Feedback
+float32 progress

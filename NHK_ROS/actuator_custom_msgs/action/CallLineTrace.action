@@ -1,0 +1,8 @@
+# Goal
+int32 mode # 0:スタートから十字，1:リトライから十字
+---
+# Result
+bool result
+---
+# Feedback
+float32 progress

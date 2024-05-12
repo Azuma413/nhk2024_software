@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainBT">
+    <Sequence>
+      <ParallelAll max_failures="1">
+        <PanTilt pan_degree="-90"
+                 tilt_degree="60"/>
+        <StartProcess wait_time_ms="100"
+                      is_retry="{retry_flag}"/>
+      </ParallelAll>
+      <Switch2 case_1="true"
+               case_2="false"
+               variable="{retry_flag}">
+        <AlwaysSuccess/>
+        <AscendSlope move_direction="0"/>
+        <AlwaysFailure/>
+      </Switch2>
+      <Sequence>
+        <MoveTarget target_x_m="2.0"
+                    target_y_m="2.4"
+                    erea="2"/>
+        <MoveTarget target_x_m="4.3"
+                    target_y_m="2.4"
+                    erea="2"/>
+        <AscendSlope move_direction="0"/>
+      </Sequence>
+      <KeepRunningUntilFailure>
+        <Sequence>
+          <ParallelAll max_failures="1">
+            <ArmControl arm_angle_degree="0"
+                        arm_range_mm="400"
+                        arm_height_mm="600"
+                        is_vacuum="false"/>
+            <MoveTarget target_x_m="3.55"
+                        target_y_m="2"
+                        erea="3"/>
+          </ParallelAll>
+          <SelectBall recommend_ball_pos_x="{ball_x}"
+                      recommend_ball_pos_y="{ball_y}"/>
+          <ParallelAll max_failures="1">
+            <PanTilt pan_degree="90"
+                     tilt_degree="90"/>
+            <ArmControl arm_angle_degree="-90"
+                        arm_range_mm="400"
+                        arm_height_mm="600"
+                        is_vacuum="false"/>
+          </ParallelAll>
+          <IfThenElse>
+            <Sequence>
+              <GetBall ball_pos_x="{ball_x}"
+                       ball_pos_y="{ball_y}"/>
+              <AscendSlope move_direction="3"/>
+            </Sequence>
+            <Sequence>
+              <ParallelAll max_failures="1">
+                <ArmControl arm_angle_degree="60"
+                            arm_range_mm="220"
+                            arm_height_mm="740"
+                            is_vacuum="true"/>
+                <MoveTarget target_x_m="4.285"
+                            target_y_m="2"
+                            erea="3"/>
+              </ParallelAll>
+              <RecogSilo recommend_id="{silo_id}"/>
+              <ArmControl arm_angle_degree="90"
+                          arm_range_mm="220"
+                          arm_height_mm="740"
+                          is_vacuum="true"/>
+              <PutBall silo_id="{silo_id}"/>
+            </Sequence>
+            <AlwaysSuccess/>
+          </IfThenElse>
+          <PanTilt pan_degree="-90"
+                   tilt_degree="60"/>
+        </Sequence>
+      </KeepRunningUntilFailure>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- Description of Node Models (used by Groot) -->
+  <TreeNodesModel>
+    <Action ID="ArmControl"
+            editable="true">
+      <input_port name="arm_angle_degree"/>
+      <input_port name="arm_range_mm"/>
+      <input_port name="arm_height_mm"/>
+      <input_port name="is_vacuum"/>
+    </Action>
+    <Action ID="AscendSlope"
+            editable="true">
+      <input_port name="move_direction"/>
+    </Action>
+    <Action ID="GetBall"
+            editable="true">
+      <input_port name="ball_pos_x"/>
+      <input_port name="ball_pos_y"/>
+    </Action>
+    <Action ID="MoveTarget"
+            editable="true">
+      <input_port name="target_x_m"/>
+      <input_port name="target_y_m"/>
+      <input_port name="erea"/>
+    </Action>
+    <Action ID="PanTilt"
+            editable="true">
+      <input_port name="pan_degree"/>
+      <input_port name="tilt_degree"/>
+    </Action>
+    <Action ID="PutBall"
+            editable="true">
+      <input_port name="silo_id"/>
+    </Action>
+    <Action ID="RecogSilo"
+            editable="true">
+      <output_port name="recommend_id"/>
+    </Action>
+    <Action ID="SelectBall"
+            editable="true">
+      <output_port name="recommend_ball_pos_x"/>
+      <output_port name="recommend_ball_pos_y"/>
+    </Action>
+    <Action ID="StartProcess"
+            editable="true">
+      <input_port name="wait_time_ms"/>
+      <output_port name="is_retry"/>
+    </Action>
+  </TreeNodesModel>
+
+</root>

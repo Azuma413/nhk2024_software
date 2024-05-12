@@ -1,0 +1,10 @@
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:33:19:_C620_PushTx8Bytes	32	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:49:19:_C620_PopSendTx8Bytes	48	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:73:19:C620_SendBytes	40	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:102:6:C620_WhenTxMailboxCompleteCallbackCalled	16	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:107:6:C620_WhenTxMailboxAbortCallbackCalled	16	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:113:6:_set_fb_data_raw	40	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:148:6:C620_WhenCANRxFifo1MsgPending	56	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:165:6:Init_C620_CAN_System	64	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:241:19:Get_C620_FeedbackData	64	static
+../CANLib_RoboMas/CAN_C620_System/CAN_C620_System.c:268:6:_change_internal_offset_for_calib	16	static

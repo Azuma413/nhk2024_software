@@ -1,0 +1,5 @@
+int16 mode # 0:掴むモード 1:置くモード
+---
+bool result
+---
+float32 progress

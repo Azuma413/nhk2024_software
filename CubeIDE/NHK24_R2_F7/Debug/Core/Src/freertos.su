@@ -1,0 +1,8 @@
+../Core/Src/freertos.c:125:6:pub_timer_callback_enc	56	static
+../Core/Src/freertos.c:139:6:subscription_callback_air	32	static
+../Core/Src/freertos.c:161:6:subscription_callback_table	24	static
+../Core/Src/freertos.c:172:6:subscription_callback	24	static
+../Core/Src/freertos.c:222:6:MX_FREERTOS_Init	8	static
+../Core/Src/freertos.c:271:6:StartDefaultTask	544	static
+../Core/Src/freertos.c:389:6:StartLEDTask	16	static
+../Core/Src/freertos.c:403:6:C620TimerCallback	16	static

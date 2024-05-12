@@ -1,0 +1,16 @@
+using System;
+using UnityEngine;
+
+public class SetID : MonoBehaviour
+{
+    void Start()
+    {
+        string value = Environment.GetEnvironmentVariable("ROS_DOMAIN_ID");
+        Debug.Log("current ROS_DOMAIN_ID:" + value + "\n");
+        // ROS_DOMAIN_IDÇ…123Çê›íËÇ∑ÇÈ
+        Environment.SetEnvironmentVariable("ROS_DOMAIN_ID", "30");
+        // è„éËÇ≠ê›íËÇ≈Ç´ÇƒÇ¢ÇÈÇ©ämîFÇ∑ÇÈ
+        value = Environment.GetEnvironmentVariable("ROS_DOMAIN_ID");
+        Debug.Log("ROS_DOMAIN_ID:" + value + "\n");
+    }
+}

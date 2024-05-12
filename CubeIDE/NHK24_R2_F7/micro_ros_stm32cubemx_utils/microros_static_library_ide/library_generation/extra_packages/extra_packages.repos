@@ -1,0 +1,9 @@
+repositories:
+  control_msgs:
+    type: git
+    url: https://github.com/ros-controls/control_msgs
+    version: foxy-devel
+
+  actuator_custom_msgs:
+    type: local
+    path: extra_packages/actuator_custom_msgs

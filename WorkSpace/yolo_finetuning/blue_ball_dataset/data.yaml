@@ -1,0 +1,5 @@
+train: D:/SourceCode/Github/nhk2024/WorkSpace/yolo_finetuning/blue_ball_dataset/train/images/
+val: D:/SourceCode/Github/nhk2024/WorkSpace/yolo_finetuning/blue_ball_dataset/valid/images/
+
+nc: 1
+names: ['BlueBall']

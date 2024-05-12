@@ -1,0 +1,6 @@
+[submodule "CANLib"]
+	path = CANLib
+	url = https://gitlab.com/kikaiken/canlib.git
+[submodule "CANLib_RoboMas"]
+	path = CANLib_RoboMas
+	url = https://gitlab.com/kikaiken/canlib_robomaster.git
